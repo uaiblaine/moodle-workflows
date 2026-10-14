@@ -1,3 +1,18 @@
+# A copy of the MAH reusable workflow (moodle-an-hochschulen/moodle-workflows,
+# .github/workflows/moodle-plugin-ci.yml at 756e15d), with ONE addition: a dependency
+# listed in plugin-dependencies that is not publicly readable is cloned with the
+# PLUGIN_DEPENDENCIES_TOKEN secret. MAH clones every dependency anonymously and has no
+# input to authenticate it, so a plugin depending on a private repository cannot use it.
+#
+# Everything else stays MAH's on purpose, so `mdl ci <repo> --matrix` keeps deriving the
+# same legs and gates from a caller's ci.yml: the file name (mdl-ci selects jobs whose
+# `uses` matches moodle-plugin-ci.yml), every input name and default, the matrix (read
+# from MAH's matrix.json at run time, the same file `mdl ci --refresh-matrix` vendors)
+# and MAH's composite actions (still referenced from MAH).
+#
+# The delta is the `secrets:` entry below and the two "Add plugin dependencies" steps,
+# kept as mah-delta.patch beside this file. To follow MAH: fetch its file again, apply
+# the patch, re-run actionlint, and update the commit named above.
 name: Moodle Plugin CI
 
 on:
@@ -148,6 +163,9 @@ on:
         required: false
       GENERIC_PASSWORD_2:
         description: Generic secret to pass another password to the workflow, if needed
+        required: false
+      PLUGIN_DEPENDENCIES_TOKEN:
+        description: Read-only token (fine-grained, Contents read) for the plugin dependencies which are not publicly readable; only used to clone those, never exported to the test steps
         required: false
 
 permissions:
@@ -511,15 +529,40 @@ jobs:
           sudo locale-gen en_AU.UTF-8
           echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
 
+      # A dependency that answers an anonymous `git ls-remote` is cloned exactly as MAH
+      # clones it. Any other one is cloned with PLUGIN_DEPENDENCIES_TOKEN, which reaches
+      # git only through GIT_CONFIG_* variables of that single add-plugin call (a
+      # url.insteadOf rewrite of that one repository's URL): it is never written to disk,
+      # never stored as the clone's origin URL, and invisible to the plugin code that the
+      # later steps run. Secrets are withheld from pull requests opened from forks and by
+      # Dependabot, so such runs stop here with the error below rather than at a git 128.
       - name: Add plugin dependencies
         if: ${{ inputs.plugin-dependencies != '' }}
+        env:
+          PLUGIN_DEPENDENCIES: ${{ inputs.plugin-dependencies }}
+          DEPENDENCIES_TOKEN: ${{ secrets.PLUGIN_DEPENDENCIES_TOKEN }}
         run: |
+          if [ -n "$DEPENDENCIES_TOKEN" ]; then
+            echo "::add-mask::$DEPENDENCIES_TOKEN"
+          fi
           # Process plugin dependencies line by line, skipping empty lines
-          echo "${{ inputs.plugin-dependencies }}" | while IFS=',' read -r repo branch; do
+          printf '%s\n' "$PLUGIN_DEPENDENCIES" | while IFS=',' read -r repo branch; do
             # Skip empty lines
             if [ -n "$repo" ] && [ -n "$branch" ]; then
               echo "Adding plugin dependency: $repo (branch: $branch)"
-              moodle-plugin-ci add-plugin --branch "$branch" "$repo"
+              if GIT_TERMINAL_PROMPT=0 git ls-remote "https://github.com/$repo.git" HEAD > /dev/null 2>&1; then
+                moodle-plugin-ci add-plugin --branch "$branch" "$repo"
+              elif [ -n "$DEPENDENCIES_TOKEN" ]; then
+                echo "$repo is not publicly readable, cloning it with the PLUGIN_DEPENDENCIES_TOKEN secret."
+                GIT_TERMINAL_PROMPT=0 \
+                  GIT_CONFIG_COUNT=1 \
+                  GIT_CONFIG_KEY_0="url.https://x-access-token:${DEPENDENCIES_TOKEN}@github.com/${repo}.insteadOf" \
+                  GIT_CONFIG_VALUE_0="https://github.com/${repo}" \
+                  moodle-plugin-ci add-plugin --branch "$branch" "$repo"
+              else
+                echo "::error::The plugin dependency $repo is not publicly readable and no PLUGIN_DEPENDENCIES_TOKEN secret reached this workflow. Map it in the secrets block of the calling ci.yml job; pull requests from forks and from Dependabot never receive secrets."
+                exit 1
+              fi
             fi
           done
 
@@ -572,11 +615,43 @@ jobs:
           # Define patterns to search for
           PATTERNS=("@testme" "TODO" "<<<<<<< HEAD")
 
+          # Third-party code declared in thirdpartylibs.xml is not ours to clean (uaiblaine delta): skip each
+          # declared location and, for an AMD source, the build files generated from it.
+          SKIP=()
+          if [ -f ./plugin/thirdpartylibs.xml ]; then
+            while IFS= read -r loc; do
+              loc="${loc%/}"
+              [ -n "$loc" ] || continue
+              SKIP+=("./plugin/$loc")
+              case "$loc" in
+                amd/src/*.js)
+                  b="${loc#amd/src/}"
+                  b="${b%.js}"
+                  SKIP+=("./plugin/amd/build/$b.min.js" "./plugin/amd/build/$b.min.js.map")
+                  ;;
+              esac
+            done < <(grep -oE '<location>[^<]+</location>' ./plugin/thirdpartylibs.xml | sed -E 's#</?location>##g')
+          fi
+          is_skipped() {
+            local s
+            for s in "${SKIP[@]}"; do
+              if [[ "$1" == "$s" || "$1" == "$s"/* ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          FILES=()
+          while IFS= read -r f; do
+            is_skipped "$f" || FILES+=("$f")
+          done < <(find ./plugin -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/vendor/*' | sort)
+          echo "Skipping ${#SKIP[@]} third-party path(s) declared in thirdpartylibs.xml."
+
           # Check each pattern
           FOUND_ISSUES=false
           for pattern in "${PATTERNS[@]}"; do
             echo "Searching for: $pattern"
-            if grep -rn --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=vendor "$pattern" ./plugin/; then
+            if [ "${#FILES[@]}" -gt 0 ] && grep -nH -- "$pattern" "${FILES[@]}"; then
               FOUND_ISSUES=true
               echo ""
             fi
@@ -721,15 +796,40 @@ jobs:
           sudo locale-gen en_AU.UTF-8
           echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
 
+      # A dependency that answers an anonymous `git ls-remote` is cloned exactly as MAH
+      # clones it. Any other one is cloned with PLUGIN_DEPENDENCIES_TOKEN, which reaches
+      # git only through GIT_CONFIG_* variables of that single add-plugin call (a
+      # url.insteadOf rewrite of that one repository's URL): it is never written to disk,
+      # never stored as the clone's origin URL, and invisible to the plugin code that the
+      # later steps run. Secrets are withheld from pull requests opened from forks and by
+      # Dependabot, so such runs stop here with the error below rather than at a git 128.
       - name: Add plugin dependencies
         if: ${{ inputs.plugin-dependencies != '' }}
+        env:
+          PLUGIN_DEPENDENCIES: ${{ inputs.plugin-dependencies }}
+          DEPENDENCIES_TOKEN: ${{ secrets.PLUGIN_DEPENDENCIES_TOKEN }}
         run: |
+          if [ -n "$DEPENDENCIES_TOKEN" ]; then
+            echo "::add-mask::$DEPENDENCIES_TOKEN"
+          fi
           # Process plugin dependencies line by line, skipping empty lines
-          echo "${{ inputs.plugin-dependencies }}" | while IFS=',' read -r repo branch; do
+          printf '%s\n' "$PLUGIN_DEPENDENCIES" | while IFS=',' read -r repo branch; do
             # Skip empty lines
             if [ -n "$repo" ] && [ -n "$branch" ]; then
               echo "Adding plugin dependency: $repo (branch: $branch)"
-              moodle-plugin-ci add-plugin --branch "$branch" "$repo"
+              if GIT_TERMINAL_PROMPT=0 git ls-remote "https://github.com/$repo.git" HEAD > /dev/null 2>&1; then
+                moodle-plugin-ci add-plugin --branch "$branch" "$repo"
+              elif [ -n "$DEPENDENCIES_TOKEN" ]; then
+                echo "$repo is not publicly readable, cloning it with the PLUGIN_DEPENDENCIES_TOKEN secret."
+                GIT_TERMINAL_PROMPT=0 \
+                  GIT_CONFIG_COUNT=1 \
+                  GIT_CONFIG_KEY_0="url.https://x-access-token:${DEPENDENCIES_TOKEN}@github.com/${repo}.insteadOf" \
+                  GIT_CONFIG_VALUE_0="https://github.com/${repo}" \
+                  moodle-plugin-ci add-plugin --branch "$branch" "$repo"
+              else
+                echo "::error::The plugin dependency $repo is not publicly readable and no PLUGIN_DEPENDENCIES_TOKEN secret reached this workflow. Map it in the secrets block of the calling ci.yml job; pull requests from forks and from Dependabot never receive secrets."
+                exit 1
+              fi
             fi
           done
 
