@@ -1,13 +1,15 @@
 diff --git a/.github/workflows/moodle-plugin-ci.yml b/.github/workflows/moodle-plugin-ci.yml
-index 5307418..30caf4b 100644
+index 5307418..13c4c15 100644
 --- a/.github/workflows/moodle-plugin-ci.yml
 +++ b/.github/workflows/moodle-plugin-ci.yml
-@@ -1,3 +1,18 @@
+@@ -1,3 +1,21 @@
 +# A copy of the MAH reusable workflow (moodle-an-hochschulen/moodle-workflows,
-+# .github/workflows/moodle-plugin-ci.yml at 756e15d), with ONE addition: a dependency
-+# listed in plugin-dependencies that is not publicly readable is cloned with the
-+# PLUGIN_DEPENDENCIES_TOKEN secret. MAH clones every dependency anonymously and has no
-+# input to authenticate it, so a plugin depending on a private repository cannot use it.
++# .github/workflows/moodle-plugin-ci.yml at 756e15d), with three additions (UAIBLAINE.md):
++# a dependency listed in plugin-dependencies that is not publicly readable is cloned with
++# the PLUGIN_DEPENDENCIES_TOKEN secret (MAH clones every dependency anonymously and has no
++# input to authenticate it, so a plugin depending on a private repository cannot use it);
++# the Development Leftover Checker skips the code declared in thirdpartylibs.xml; and
++# gherkinlint skips the features of the plugin dependencies.
 +#
 +# Everything else stays MAH's on purpose, so `mdl ci <repo> --matrix` keeps deriving the
 +# same legs and gates from a caller's ci.yml: the file name (mdl-ci selects jobs whose
@@ -15,13 +17,14 @@ index 5307418..30caf4b 100644
 +# from MAH's matrix.json at run time, the same file `mdl ci --refresh-matrix` vendors)
 +# and MAH's composite actions (still referenced from MAH).
 +#
-+# The delta is the `secrets:` entry below and the two "Add plugin dependencies" steps,
-+# kept as mah-delta.patch beside this file. To follow MAH: fetch its file again, apply
-+# the patch, re-run actionlint, and update the commit named above.
++# The delta is the `secrets:` entry below, the two "Add plugin dependencies" steps, the
++# Development Leftover Checker step and the Grunt step, kept as uaiblaine/mah-delta.patch.
++# To follow MAH: fetch its file again, apply the patch, re-run actionlint, and update the
++# commit named above.
  name: Moodle Plugin CI
  
  on:
-@@ -149,6 +164,9 @@ on:
+@@ -149,6 +167,9 @@ on:
        GENERIC_PASSWORD_2:
          description: Generic secret to pass another password to the workflow, if needed
          required: false
@@ -31,7 +34,7 @@ index 5307418..30caf4b 100644
  
  permissions:
    contents: read
-@@ -511,15 +529,40 @@ jobs:
+@@ -511,15 +532,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  
@@ -74,7 +77,7 @@ index 5307418..30caf4b 100644
              fi
            done
  
-@@ -572,11 +615,43 @@ jobs:
+@@ -572,11 +618,43 @@ jobs:
            # Define patterns to search for
            PATTERNS=("@testme" "TODO" "<<<<<<< HEAD")
  
@@ -119,7 +122,66 @@ index 5307418..30caf4b 100644
                FOUND_ISSUES=true
                echo ""
              fi
-@@ -721,15 +796,40 @@ jobs:
+@@ -655,9 +733,57 @@ jobs:
+             done
+           fi
+ 
++      # uaiblaine delta: moodle-plugin-ci runs core's gherkinlint task from the Moodle root, which lints
++      # every feature in the tree, so two plugin dependencies sharing a feature name (mod_customcert and
++      # tool_certificate share seven) fail the plugin under test on files it does not own. Core's task
++      # reads a .gherkin-lintignore at the Moodle root: it is written here with the directory each
++      # dependency was installed in, so the plugin's own features stay linted against core's, with
++      # core's rules, and the dependencies' are not linted at all. node_modules/** is gherkin-lint's
++      # default, which any ignore file replaces. The function is bin/lib/mah-parity.sh's in
++      # uaiblaine/moodle-dev, copied verbatim, where `mdl selfcheck mahparity` tests it.
+       - name: Grunt
+         if: ${{ !cancelled() }}
+-        run: moodle-plugin-ci grunt --max-lint-warnings ${{ inputs.grunt-max-lint-warnings }}
++        run: |
++          mah_gherkin_lintignore() {
++              local moodle="$1" extras="$2" dir comp type typedir
++              echo 'node_modules/**'
++              for dir in "$extras"/*/; do
++                  [ -d "$dir" ] || continue
++                  comp="$(sed -n "/^[[:space:]]*\$plugin->component[[:space:]]*=/{s/^[^=]*=[[:space:]]*'\([a-z0-9_]*\)'.*/\1/p;q;}" \
++                      "${dir}version.php" 2>/dev/null)" || comp=""
++                  type="${comp%%_*}"
++                  typedir=""
++                  if [ -n "$comp" ] && [ "$type" != "$comp" ]; then
++                      typedir="$(awk -v t="$type" '
++                          /"plugintypes"[[:space:]]*:/ { inblock = 1; next }
++                          inblock && /}/ { exit }
++                          inblock && $0 ~ "^[[:space:]]*\"" t "\"[[:space:]]*:" {
++                              v = $0
++                              sub(/^[^:]*:[[:space:]]*"/, "", v)
++                              sub(/".*$/, "", v)
++                              gsub(/\\\//, "/", v)
++                              print v
++                              exit
++                          }' "$moodle/lib/components.json")"
++                  fi
++                  if [ -z "$typedir" ]; then
++                      echo "gherkinlint: cannot place the dependency ${dir%/} (component '$comp') in $moodle/lib/components.json" >&2
++                      return 1
++                  fi
++                  echo "$typedir/${comp#*_}/**"
++              done
++          }
++          MOODLE_DIR=$(grep '^MOODLE_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
++          EXTRA_PLUGINS_DIR=$(grep '^EXTRA_PLUGINS_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
++          if [ -n "$MOODLE_DIR" ] && [ -n "$EXTRA_PLUGINS_DIR" ] && [ -d "$EXTRA_PLUGINS_DIR" ]; then
++            if ! mah_gherkin_lintignore "$MOODLE_DIR" "$EXTRA_PLUGINS_DIR" > "$MOODLE_DIR/.gherkin-lintignore"; then
++              echo "::error::Could not list the plugin dependencies for gherkinlint to skip."
++              exit 1
++            fi
++            echo "gherkinlint skips the plugin dependencies' features, .gherkin-lintignore:"
++            sed 's/^/    /' "$MOODLE_DIR/.gherkin-lintignore"
++          fi
++          moodle-plugin-ci grunt --max-lint-warnings ${{ inputs.grunt-max-lint-warnings }}
+ 
+       - name: Mark cancelled jobs as failed.
+         if: ${{ cancelled() }}
+@@ -721,15 +847,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  

@@ -2,10 +2,10 @@
 
 This is a fork of [moodle-an-hochschulen/moodle-workflows](https://github.com/moodle-an-hochschulen/moodle-workflows).
 The workflows, their copyright and their documentation (README.md) are Moodle an Hochschulen e.V.'s;
-this fork carries one change to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
-it can be re-applied on top of upstream.
+this fork carries three changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
+they can be re-applied on top of upstream.
 
-## The change
+## The changes
 
 1. **Private plugin dependencies.** A new optional secret, `PLUGIN_DEPENDENCIES_TOKEN`. Each entry of
    `plugin-dependencies` is first probed anonymously; a public repository is cloned exactly as upstream
@@ -18,6 +18,17 @@ it can be re-applied on top of upstream.
    `thirdpartylibs.xml`, and for an `amd/src/*.js` location its `amd/build` `.min.js` and `.min.js.map`,
    are left out of the `TODO` / `@testme` / conflict-marker search: vendored libraries are not the
    plugin's to clean, and AMD modules cannot live in an excluded `vendor/` directory.
+3. **gherkinlint skips the plugin dependencies' features.** `moodle-plugin-ci grunt` runs core's
+   `gherkinlint` task from the Moodle root whenever the plugin has Behat features, and from there core
+   lints every `tests/behat/*.feature` in the tree, dependencies included, so `no-dupe-feature-names`
+   fails the plugin on two dependencies that share a feature name (`mod_customcert` and
+   `tool_certificate` share seven). The Grunt step first writes a `.gherkin-lintignore` at the Moodle
+   root, which core's task honours, naming the directory each dependency was installed in (its
+   `$plugin->component` placed through core's `lib/components.json`). The plugin's own features are
+   still linted against core's, with core's `.gherkin-lintrc`; without dependencies the file is not
+   written and the step is upstream's. The shell function is `bin/lib/mah-parity.sh`'s in
+   `uaiblaine/moodle-dev`, copied verbatim, where `mdl selfcheck mahparity` tests it and `mdl ci`
+   applies it to every leg whose job calls this fork.
 
 Inputs, job names and the file name are upstream's, so callers and tools that read callers
 (`uses: .../moodle-plugin-ci.yml`) work unchanged.
