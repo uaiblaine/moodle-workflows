@@ -35,7 +35,10 @@ they can be re-applied on top of upstream.
    GitHub's runners until the repository variable names a self-hosted label (`mdl-mini`, the Mac mini
    in `uaiblaine/moodle-dev`'s `mdl runner`). On an ARM64 runner the Behat step's Selenium image
    defaults to `selenium/standalone-chromium:4`: `standalone-chrome` has no arm64 manifest.
-   `MOODLE_BEHAT_SELENIUM_IMAGE` still overrides it.
+   `MOODLE_BEHAT_SELENIUM_IMAGE` still overrides it. On a self-hosted runner the two setup-php
+   steps also get `runner: self-hosted` and the extensions GitHub's prebuilt PHP carries (gd,
+   intl, zip, sodium, exif, soap): setup-php then installs PHP from packages, and core's
+   `composer install` refuses to run without gd.
 
 Upstream's inputs keep their names and defaults, job names and the file name are upstream's, so callers and tools that read callers
 (`uses: .../moodle-plugin-ci.yml`) work unchanged.
