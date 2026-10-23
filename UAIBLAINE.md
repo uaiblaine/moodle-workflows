@@ -2,7 +2,7 @@
 
 This is a fork of [moodle-an-hochschulen/moodle-workflows](https://github.com/moodle-an-hochschulen/moodle-workflows).
 The workflows, their copyright and their documentation (README.md) are Moodle an Hochschulen e.V.'s;
-this fork carries three changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
+this fork carries four changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
 they can be re-applied on top of upstream.
 
 ## The changes
@@ -30,7 +30,14 @@ they can be re-applied on top of upstream.
    `uaiblaine/moodle-dev`, copied verbatim, where `mdl selfcheck mahparity` tests it and `mdl ci`
    applies it to every leg whose job calls this fork.
 
-Inputs, job names and the file name are upstream's, so callers and tools that read callers
+4. **Self-hosted runner input.** A new optional input, `runner` (default empty). Every job runs on
+   `${{ inputs.runner || 'ubuntu-24.04' }}`, so a caller passing `runner: ${{ vars.CI_RUNNER }}` stays on
+   GitHub's runners until the repository variable names a self-hosted label (`mdl-mini`, the Mac mini
+   in `uaiblaine/moodle-dev`'s `mdl runner`). On an ARM64 runner the Behat step's Selenium image
+   defaults to `selenium/standalone-chromium:4`: `standalone-chrome` has no arm64 manifest.
+   `MOODLE_BEHAT_SELENIUM_IMAGE` still overrides it.
+
+Upstream's inputs keep their names and defaults, job names and the file name are upstream's, so callers and tools that read callers
 (`uses: .../moodle-plugin-ci.yml`) work unchanged.
 
 ## Using it
