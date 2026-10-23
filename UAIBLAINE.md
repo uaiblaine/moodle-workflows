@@ -48,6 +48,7 @@ jobs:
     uses: uaiblaine/moodle-workflows/.github/workflows/moodle-plugin-ci.yml@main
     with:
       moodle-core-branch: MOODLE_503_STABLE
+      runner: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER || '' }}
       plugin-dependencies: |
         uaiblaine/moodle-mod_interactivevideo,main
     secrets:
@@ -56,6 +57,12 @@ jobs:
 
 The token is a fine-grained personal access token with read-only Contents access to the private
 dependency repositories only.
+
+The `runner` expression asks for the self-hosted label in `CI_RUNNER` only for the repository's
+own code. A pull request from a fork carries the fork's copy of the workflow, so the Mac mini's
+dispatcher refuses it whatever it asks for (`uaiblaine/moodle-dev` #111); the expression sends
+such a pull request to `ubuntu-24.04` instead of leaving its jobs waiting. Public repositories
+also require approval for every external contributor's workflow run.
 
 ## Syncing with upstream
 
