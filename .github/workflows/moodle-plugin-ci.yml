@@ -525,9 +525,14 @@ jobs:
 
       - name: Setup PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
+        # On a self-hosted runner setup-php installs PHP from packages instead of GitHub's
+        # prebuilt builds, which carry gd, intl, zip, sodium, exif and soap; core's composer
+        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md).
+        env:
+          runner: ${{ inputs.runner != '' && 'self-hosted' || '' }}
         with:
           php-version: ${{ matrix.php }}
-          extensions: ${{ matrix.extensions }}
+          extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
           ini-values: max_input_vars=5000, opcache.enable_cli=1
           coverage: none
 
@@ -840,9 +845,14 @@ jobs:
 
       - name: Setup PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
+        # On a self-hosted runner setup-php installs PHP from packages instead of GitHub's
+        # prebuilt builds, which carry gd, intl, zip, sodium, exif and soap; core's composer
+        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md).
+        env:
+          runner: ${{ inputs.runner != '' && 'self-hosted' || '' }}
         with:
           php-version: ${{ matrix.php }}
-          extensions: ${{ matrix.extensions }}
+          extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
           ini-values: max_input_vars=5000, opcache.enable_cli=1
           coverage: none
 
