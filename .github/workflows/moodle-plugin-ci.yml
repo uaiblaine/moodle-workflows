@@ -787,6 +787,9 @@ jobs:
           }
           MOODLE_DIR=$(grep '^MOODLE_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
           EXTRA_PLUGINS_DIR=$(grep '^EXTRA_PLUGINS_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
+          # `moodle-plugin-ci install` rewrites ci/.env with its own values only, dropping the
+          # EXTRA_PLUGINS_DIR that add-plugin wrote; fall back to add-plugin's default storage.
+          [ -n "$EXTRA_PLUGINS_DIR" ] || EXTRA_PLUGINS_DIR="$PWD/moodle-plugin-ci-plugins"
           if [ -n "$MOODLE_DIR" ] && [ -n "$EXTRA_PLUGINS_DIR" ] && [ -d "$EXTRA_PLUGINS_DIR" ]; then
             if ! mah_gherkin_lintignore "$MOODLE_DIR" "$EXTRA_PLUGINS_DIR" > "$MOODLE_DIR/.gherkin-lintignore"; then
               echo "::error::Could not list the plugin dependencies for gherkinlint to skip."
