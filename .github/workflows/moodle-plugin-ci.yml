@@ -15,7 +15,8 @@
 #
 # The delta is the `secrets:` entry below, the two "Add plugin dependencies" steps, the
 # Development Leftover Checker step, the Grunt step, the `runner` input with the four
-# `runs-on` lines and the Selenium image default, kept as uaiblaine/mah-delta.patch.
+# `runs-on` lines, the Selenium image default and the setup-php inputs, kept as
+# uaiblaine/mah-delta.patch.
 # To follow MAH: fetch its file again, apply the patch, re-run actionlint, and update the
 # commit named above.
 name: Moodle Plugin CI
@@ -527,13 +528,16 @@ jobs:
         uses: shivammathur/setup-php@v2
         # On a self-hosted runner setup-php installs PHP from packages instead of GitHub's
         # prebuilt builds, which carry gd, intl, zip, sodium, exif and soap; core's composer
-        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md).
+        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md). opcache.enable_cli makes
+        # setup-php switch the JIT on as well (opcache.jit=1235); on ARM64 that JIT crashes
+        # PHP 8.4 while admin_apply_default_settings() loads Boost Union's settings.php, so it is
+        # disabled there and opcache itself stays on.
         env:
           runner: ${{ inputs.runner != '' && 'self-hosted' || '' }}
         with:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
-          ini-values: max_input_vars=5000, opcache.enable_cli=1
+          ini-values: max_input_vars=5000, opcache.enable_cli=1${{ runner.arch == 'ARM64' && ', opcache.jit=disable' || '' }}
           coverage: none
 
       - name: Initialise moodle-plugin-ci
@@ -850,13 +854,16 @@ jobs:
         uses: shivammathur/setup-php@v2
         # On a self-hosted runner setup-php installs PHP from packages instead of GitHub's
         # prebuilt builds, which carry gd, intl, zip, sodium, exif and soap; core's composer
-        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md).
+        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md). opcache.enable_cli makes
+        # setup-php switch the JIT on as well (opcache.jit=1235); on ARM64 that JIT crashes
+        # PHP 8.4 while admin_apply_default_settings() loads Boost Union's settings.php, so it is
+        # disabled there and opcache itself stays on.
         env:
           runner: ${{ inputs.runner != '' && 'self-hosted' || '' }}
         with:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
-          ini-values: max_input_vars=5000, opcache.enable_cli=1
+          ini-values: max_input_vars=5000, opcache.enable_cli=1${{ runner.arch == 'ARM64' && ', opcache.jit=disable' || '' }}
           coverage: none
 
       - name: Initialise moodle-plugin-ci

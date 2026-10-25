@@ -41,7 +41,12 @@ they can be re-applied on top of upstream.
    `MOODLE_BEHAT_SELENIUM_IMAGE` still overrides it. On a self-hosted runner the two setup-php
    steps also get `runner: self-hosted` and the extensions GitHub's prebuilt PHP carries (gd,
    intl, zip, sodium, exif, soap): setup-php then installs PHP from packages, and core's
-   `composer install` refuses to run without gd.
+   `composer install` refuses to run without gd. On an ARM64 runner they also add
+   `opcache.jit=disable` to `ini-values`: `opcache.enable_cli=1` makes setup-php turn the JIT on
+   (`opcache.jit=1235`, 128M buffer on aarch64), and on aarch64 that JIT setting crashes PHP 8.4
+   (SIGSEGV, SIGILL or a spin) in `admin_apply_default_settings()` once Boost Union's
+   `settings.php` is in the tree, so a Boost Union child theme never gets past
+   "Initialize test suite". opcache stays on; only the JIT goes.
 
 Upstream's inputs keep their names and defaults, job names and the file name are upstream's, so callers and tools that read callers
 (`uses: .../moodle-plugin-ci.yml`) work unchanged.

@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/moodle-plugin-ci.yml b/.github/workflows/moodle-plugin-ci.yml
-index 5307418..c4a4b8c 100644
+index 5307418..4845e65 100644
 --- a/.github/workflows/moodle-plugin-ci.yml
 +++ b/.github/workflows/moodle-plugin-ci.yml
-@@ -1,3 +1,23 @@
+@@ -1,3 +1,24 @@
 +# A copy of the MAH reusable workflow (moodle-an-hochschulen/moodle-workflows,
 +# .github/workflows/moodle-plugin-ci.yml at 756e15d), with four additions (UAIBLAINE.md):
 +# a dependency listed in plugin-dependencies that is not publicly readable is cloned with
@@ -20,13 +20,14 @@ index 5307418..c4a4b8c 100644
 +#
 +# The delta is the `secrets:` entry below, the two "Add plugin dependencies" steps, the
 +# Development Leftover Checker step, the Grunt step, the `runner` input with the four
-+# `runs-on` lines and the Selenium image default, kept as uaiblaine/mah-delta.patch.
++# `runs-on` lines, the Selenium image default and the setup-php inputs, kept as
++# uaiblaine/mah-delta.patch.
 +# To follow MAH: fetch its file again, apply the patch, re-run actionlint, and update the
 +# commit named above.
  name: Moodle Plugin CI
  
  on:
-@@ -136,6 +156,11 @@ on:
+@@ -136,6 +157,11 @@ on:
          type: boolean
          required: false
          default: true
@@ -38,7 +39,7 @@ index 5307418..c4a4b8c 100644
      secrets:
        GENERIC_USERNAME_1:
          description: Generic secret to pass a username to the workflow, if needed
-@@ -149,6 +174,9 @@ on:
+@@ -149,6 +175,9 @@ on:
        GENERIC_PASSWORD_2:
          description: Generic secret to pass another password to the workflow, if needed
          required: false
@@ -48,7 +49,7 @@ index 5307418..c4a4b8c 100644
  
  permissions:
    contents: read
-@@ -160,7 +188,7 @@ concurrency:
+@@ -160,7 +189,7 @@ concurrency:
  jobs:
    preflight:
      name: Preflight
@@ -57,7 +58,7 @@ index 5307418..c4a4b8c 100644
      outputs:
        matrix-static: ${{ steps.preflight-matrix.outputs.matrix-static }}
        matrix-run: ${{ steps.preflight-matrix.outputs.matrix-run }}
-@@ -471,7 +499,7 @@ jobs:
+@@ -471,7 +500,7 @@ jobs:
  
    static:
      name: Static checks
@@ -66,23 +67,28 @@ index 5307418..c4a4b8c 100644
      needs: preflight
  
      services:
-@@ -497,9 +525,14 @@ jobs:
+@@ -497,10 +526,18 @@ jobs:
  
        - name: Setup PHP ${{ matrix.php }}
          uses: shivammathur/setup-php@v2
 +        # On a self-hosted runner setup-php installs PHP from packages instead of GitHub's
 +        # prebuilt builds, which carry gd, intl, zip, sodium, exif and soap; core's composer
-+        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md).
++        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md). opcache.enable_cli makes
++        # setup-php switch the JIT on as well (opcache.jit=1235); on ARM64 that JIT crashes
++        # PHP 8.4 while admin_apply_default_settings() loads Boost Union's settings.php, so it is
++        # disabled there and opcache itself stays on.
 +        env:
 +          runner: ${{ inputs.runner != '' && 'self-hosted' || '' }}
          with:
            php-version: ${{ matrix.php }}
 -          extensions: ${{ matrix.extensions }}
+-          ini-values: max_input_vars=5000, opcache.enable_cli=1
 +          extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
-           ini-values: max_input_vars=5000, opcache.enable_cli=1
++          ini-values: max_input_vars=5000, opcache.enable_cli=1${{ runner.arch == 'ARM64' && ', opcache.jit=disable' || '' }}
            coverage: none
  
-@@ -511,15 +544,40 @@ jobs:
+       - name: Initialise moodle-plugin-ci
+@@ -511,15 +548,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  
@@ -125,7 +131,7 @@ index 5307418..c4a4b8c 100644
              fi
            done
  
-@@ -572,11 +630,43 @@ jobs:
+@@ -572,11 +634,43 @@ jobs:
            # Define patterns to search for
            PATTERNS=("@testme" "TODO" "<<<<<<< HEAD")
  
@@ -170,7 +176,7 @@ index 5307418..c4a4b8c 100644
                FOUND_ISSUES=true
                echo ""
              fi
-@@ -655,9 +745,60 @@ jobs:
+@@ -655,9 +749,60 @@ jobs:
              done
            fi
  
@@ -232,7 +238,7 @@ index 5307418..c4a4b8c 100644
  
        - name: Mark cancelled jobs as failed.
          if: ${{ cancelled() }}
-@@ -665,7 +806,7 @@ jobs:
+@@ -665,7 +810,7 @@ jobs:
  
    run:
      name: Runtime tests
@@ -241,23 +247,28 @@ index 5307418..c4a4b8c 100644
      needs: preflight
      env:
        GENERIC_USERNAME_1: ${{ secrets.GENERIC_USERNAME_1 }}
-@@ -707,9 +848,14 @@ jobs:
+@@ -707,10 +852,18 @@ jobs:
  
        - name: Setup PHP ${{ matrix.php }}
          uses: shivammathur/setup-php@v2
 +        # On a self-hosted runner setup-php installs PHP from packages instead of GitHub's
 +        # prebuilt builds, which carry gd, intl, zip, sodium, exif and soap; core's composer
-+        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md).
++        # install needs gd at least (uaiblaine fork, see UAIBLAINE.md). opcache.enable_cli makes
++        # setup-php switch the JIT on as well (opcache.jit=1235); on ARM64 that JIT crashes
++        # PHP 8.4 while admin_apply_default_settings() loads Boost Union's settings.php, so it is
++        # disabled there and opcache itself stays on.
 +        env:
 +          runner: ${{ inputs.runner != '' && 'self-hosted' || '' }}
          with:
            php-version: ${{ matrix.php }}
 -          extensions: ${{ matrix.extensions }}
+-          ini-values: max_input_vars=5000, opcache.enable_cli=1
 +          extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
-           ini-values: max_input_vars=5000, opcache.enable_cli=1
++          ini-values: max_input_vars=5000, opcache.enable_cli=1${{ runner.arch == 'ARM64' && ', opcache.jit=disable' || '' }}
            coverage: none
  
-@@ -721,15 +867,40 @@ jobs:
+       - name: Initialise moodle-plugin-ci
+@@ -721,15 +874,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  
@@ -300,7 +311,7 @@ index 5307418..c4a4b8c 100644
              fi
            done
  
-@@ -857,7 +1028,7 @@ jobs:
+@@ -857,7 +1035,7 @@ jobs:
            # Moodle directory mounted at the same path for file uploads in Behat).
            docker run -d --rm --name=selenium --network=host --shm-size=2g \
              -v "$MOODLE_DIR:$MOODLE_DIR" \
@@ -309,7 +320,7 @@ index 5307418..c4a4b8c 100644
  
            # Moodle 5.1+ serves the site from the public subdirectory.
            DOCROOT="$MOODLE_DIR"
-@@ -1019,7 +1190,7 @@ jobs:
+@@ -1019,7 +1197,7 @@ jobs:
  
    verify:
      name: Runtime verification
