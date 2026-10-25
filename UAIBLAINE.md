@@ -24,7 +24,10 @@ they can be re-applied on top of upstream.
    fails the plugin on two dependencies that share a feature name (`mod_customcert` and
    `tool_certificate` share seven). The Grunt step first writes a `.gherkin-lintignore` at the Moodle
    root, which core's task honours, naming the directory each dependency was installed in (its
-   `$plugin->component` placed through core's `lib/components.json`). The plugin's own features are
+   `$plugin->component` placed through core's `lib/components.json`). The dependencies are found in
+   add-plugin's storage directory: `moodle-plugin-ci install` rewrites `ci/.env` with its own values,
+   dropping the `EXTRA_PLUGINS_DIR` that add-plugin wrote, so the step falls back to add-plugin's
+   default `moodle-plugin-ci-plugins`. The plugin's own features are
    still linted against core's, with core's `.gherkin-lintrc`; without dependencies the file is not
    written and the step is upstream's. The shell function is `bin/lib/mah-parity.sh`'s in
    `uaiblaine/moodle-dev`, copied verbatim, where `mdl selfcheck mahparity` tests it and `mdl ci`
