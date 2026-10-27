@@ -804,6 +804,37 @@ jobs:
           fi
           moodle-plugin-ci grunt --max-lint-warnings ${{ inputs.grunt-max-lint-warnings }}
 
+      # Jest over the plugin's js/esm/tests (uaiblaine fork, UAIBLAINE.md change 5): core's own
+      # Jest, as Moodle 5.3+ ships it in jest.config.js at the root, over the installed copy of
+      # the plugin only. Skips, both passing: no js/esm/tests (silently), and a core without
+      # jest.config.js (5.2 and older, said so). The config reads the generated
+      # tsconfig.aliases.json, which `grunt jsconfig` writes. A failing test fails the job.
+      # The shell function is bin/lib/esm-jest.sh's in uaiblaine/moodle-dev, copied verbatim.
+      - name: Jest
+        if: ${{ !cancelled() }}
+        run: |
+          esm_jest() {
+              local plugin="${1%/}"
+              [[ -d "$plugin/js/esm/tests" ]] || return 0
+              if [[ ! -f jest.config.js ]]; then
+                  echo "jest: core has no jest.config.js (Moodle 5.2 and older), skipping $plugin/js/esm/tests"
+                  return 0
+              fi
+              npx grunt jsconfig || return 1
+              npx jest --ci "$plugin/js/esm/tests"
+          }
+          MOODLE_DIR=$(grep '^MOODLE_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
+          PLUGIN_DIR=$(grep '^PLUGIN_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
+          if [ -z "$MOODLE_DIR" ] || [ -z "$PLUGIN_DIR" ]; then
+            if [ -d ./plugin/js/esm/tests ]; then
+              echo "::error::Could not find the installed copy of the plugin (MOODLE_DIR/PLUGIN_DIR in ci/.env) to run Jest over."
+              exit 1
+            fi
+            exit 0
+          fi
+          cd "$MOODLE_DIR"
+          esm_jest "${PLUGIN_DIR#"$MOODLE_DIR"/}"
+
       - name: Mark cancelled jobs as failed.
         if: ${{ cancelled() }}
         run: exit 1

@@ -2,7 +2,7 @@
 
 This is a fork of [moodle-an-hochschulen/moodle-workflows](https://github.com/moodle-an-hochschulen/moodle-workflows).
 The workflows, their copyright and their documentation (README.md) are Moodle an Hochschulen e.V.'s;
-this fork carries four changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
+this fork carries five changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
 they can be re-applied on top of upstream.
 
 ## The changes
@@ -47,6 +47,16 @@ they can be re-applied on top of upstream.
    (SIGSEGV, SIGILL or a spin) in `admin_apply_default_settings()` once Boost Union's
    `settings.php` is in the tree, so a Boost Union child theme never gets past
    "Initialize test suite". opcache stays on; only the JIT goes.
+
+5. **Jest step.** After Grunt, a `Jest` step runs core's own Jest over the installed plugin copy's
+   `js/esm/tests`: Moodle 5.3+ ships `jest.config.js` at the root (testMatch
+   `**/esm/tests/**/*.test.{ts,tsx}`, jsdom, ts-jest with `tsconfig.jest.json`, Testing Library,
+   jest-dom), which needs the generated `tsconfig.aliases.json`, so the step runs
+   `npx grunt jsconfig` and then `npx jest --ci <plugin path relative to the Moodle root>/js/esm/tests`
+   from the Moodle root. A plugin without `js/esm/tests` skips silently; a core without
+   `jest.config.js` (5.2 and older) prints that it skips and passes; a failing test fails the job.
+   The shell function is `bin/lib/esm-jest.sh`'s in `uaiblaine/moodle-dev`, copied verbatim; `mdl ci`
+   runs the same step as `jest` (`--only jest`).
 
 Upstream's inputs keep their names and defaults, job names and the file name are upstream's, so callers and tools that read callers
 (`uses: .../moodle-plugin-ci.yml`) work unchanged.
