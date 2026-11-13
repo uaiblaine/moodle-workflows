@@ -1,16 +1,18 @@
 diff --git a/.github/workflows/moodle-plugin-ci.yml b/.github/workflows/moodle-plugin-ci.yml
-index 5307418..37c08f1 100644
+index 5307418..b70c5e9 100644
 --- a/.github/workflows/moodle-plugin-ci.yml
 +++ b/.github/workflows/moodle-plugin-ci.yml
-@@ -1,3 +1,24 @@
+@@ -1,3 +1,27 @@
 +# A copy of the MAH reusable workflow (moodle-an-hochschulen/moodle-workflows,
-+# .github/workflows/moodle-plugin-ci.yml at 756e15d), with four additions (UAIBLAINE.md):
++# .github/workflows/moodle-plugin-ci.yml at 756e15d), with these additions (UAIBLAINE.md):
 +# a dependency listed in plugin-dependencies that is not publicly readable is cloned with
 +# the PLUGIN_DEPENDENCIES_TOKEN secret (MAH clones every dependency anonymously and has no
 +# input to authenticate it, so a plugin depending on a private repository cannot use it);
 +# the Development Leftover Checker skips the code declared in thirdpartylibs.xml; and
-+# gherkinlint skips the features of the plugin dependencies; and a `runner` input sends
-+# every job to a self-hosted runner label instead of ubuntu-24.04.
++# gherkinlint skips the features of the plugin dependencies; a `runner` input sends
++# every job to a self-hosted runner label instead of ubuntu-24.04; a Jest step runs core's
++# Jest over the plugin's js/esm/tests; and an ESM build check fails a committed js/esm that
++# core 5.3's `grunt esm` would not rebuild identically.
 +#
 +# Everything else stays MAH's on purpose, so `mdl ci <repo> --matrix` keeps deriving the
 +# same legs and gates from a caller's ci.yml: the file name (mdl-ci selects jobs whose
@@ -19,15 +21,16 @@ index 5307418..37c08f1 100644
 +# and MAH's composite actions (still referenced from MAH).
 +#
 +# The delta is the `secrets:` entry below, the two "Add plugin dependencies" steps, the
-+# Development Leftover Checker step, the Grunt step, the `runner` input with the four
-+# `runs-on` lines, the Selenium image default and the setup-php inputs, kept as
++# Development Leftover Checker step, the Grunt, ESM build check and Jest steps, the
++# `runner` input with the four `runs-on` lines, the Selenium image default and the
++# setup-php inputs, kept as
 +# uaiblaine/mah-delta.patch.
 +# To follow MAH: fetch its file again, apply the patch, re-run actionlint, and update the
 +# commit named above.
  name: Moodle Plugin CI
  
  on:
-@@ -136,6 +157,11 @@ on:
+@@ -136,6 +160,11 @@ on:
          type: boolean
          required: false
          default: true
@@ -39,7 +42,7 @@ index 5307418..37c08f1 100644
      secrets:
        GENERIC_USERNAME_1:
          description: Generic secret to pass a username to the workflow, if needed
-@@ -149,6 +175,9 @@ on:
+@@ -149,6 +178,9 @@ on:
        GENERIC_PASSWORD_2:
          description: Generic secret to pass another password to the workflow, if needed
          required: false
@@ -49,7 +52,7 @@ index 5307418..37c08f1 100644
  
  permissions:
    contents: read
-@@ -160,7 +189,7 @@ concurrency:
+@@ -160,7 +192,7 @@ concurrency:
  jobs:
    preflight:
      name: Preflight
@@ -58,7 +61,7 @@ index 5307418..37c08f1 100644
      outputs:
        matrix-static: ${{ steps.preflight-matrix.outputs.matrix-static }}
        matrix-run: ${{ steps.preflight-matrix.outputs.matrix-run }}
-@@ -471,7 +500,7 @@ jobs:
+@@ -471,7 +503,7 @@ jobs:
  
    static:
      name: Static checks
@@ -67,7 +70,7 @@ index 5307418..37c08f1 100644
      needs: preflight
  
      services:
-@@ -497,10 +526,18 @@ jobs:
+@@ -497,10 +529,18 @@ jobs:
  
        - name: Setup PHP ${{ matrix.php }}
          uses: shivammathur/setup-php@v2
@@ -88,7 +91,7 @@ index 5307418..37c08f1 100644
            coverage: none
  
        - name: Initialise moodle-plugin-ci
-@@ -511,15 +548,40 @@ jobs:
+@@ -511,15 +551,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  
@@ -131,7 +134,7 @@ index 5307418..37c08f1 100644
              fi
            done
  
-@@ -572,11 +634,43 @@ jobs:
+@@ -572,11 +637,43 @@ jobs:
            # Define patterns to search for
            PATTERNS=("@testme" "TODO" "<<<<<<< HEAD")
  
@@ -176,7 +179,7 @@ index 5307418..37c08f1 100644
                FOUND_ISSUES=true
                echo ""
              fi
-@@ -655,9 +749,91 @@ jobs:
+@@ -655,9 +752,317 @@ jobs:
              done
            fi
  
@@ -236,6 +239,232 @@ index 5307418..37c08f1 100644
 +          fi
 +          moodle-plugin-ci grunt --max-lint-warnings ${{ inputs.grunt-max-lint-warnings }}
 +
++      # The committed ES module build of a Moodle 5.3+ plugin (uaiblaine fork, UAIBLAINE.md change 6).
++      # `moodle-plugin-ci grunt` runs a fixed task list (amd, yui, gherkinlint, stylelint) and then
++      # hashes the plugin's *.js against a pre-run backup, so it reads js/esm/build and always finds
++      # it unchanged: no task rebuilt it, and a stale React build passes. Core 5.3's `grunt esm`
++      # (.grunt/tasks/esm.js) deletes every component's js/esm/build before rebuilding, writes a
++      # .dev.js variant beside each output and rewrites js/esm/src/swizzle.json, so the check
++      # rebuilds the installed copy in place and compares its whole js/esm with the checkout's.
++      # The task rebuilds every component in the tree, core's and the dependencies' too: their
++      # js/esm/build directories are archived first and put back afterwards, and only the plugin's
++      # own js/esm is compared. A plugin whose js/esm/bundle.json opts into one bundled output gets
++      # it rebuilt after the task, which deletes it, by the script below. The copy is restored
++      # afterwards, so the Jest step reads the plugin as installed. Skips, both passing: no
++      # js/esm/src (silently), and a core without .grunt/tasks/esm.js (5.2 and older, said so).
++      # The function mirrors esm_tree_check in uaiblaine/moodle-dev's bin/mdl-ci, and the bundle
++      # script is its ci/esm-bundle.mjs, copied verbatim: keep the three in step.
++      - name: ESM build check
++        if: ${{ !cancelled() }}
++        run: |
++          esm_tree_check() {  # $1 = the checked-out plugin, $2 = its installed copy, $3 = the bundle script; cwd = the Moodle root
++              local committed="$1" copy="$2" bundler="$3" backup="$RUNNER_TEMP/esm-backup" \
++                  others="$RUNNER_TEMP/esm-others.tar" verdict=0 report drc=0 builds
++              rm -rf "$backup" "$others"
++              cp -a "$copy/js/esm" "$backup" || return 1
++              builds="$(find . -path ./node_modules -prune -o -type d \
++                  -path '*/js/esm/build' ! -path "./${copy#"$PWD"/}/js/esm/build" -print)"
++              if [ -n "$builds" ]; then
++                  tar -cf "$others" -T - <<<"$builds" || return 1
++              fi
++              echo "esm: npx grunt esm (core 5.3+), then the whole js/esm compared with a fresh build"
++              npx grunt esm || verdict=1
++              if [ "$verdict" -eq 0 ] && [ -f "$copy/js/esm/bundle.json" ]; then
++                  node "$bundler" "$copy" || verdict=1
++              fi
++              if [ "$verdict" -eq 0 ]; then
++                  report="$(diff -rq "$committed/js/esm" "$copy/js/esm" 2>&1)" || drc=$?
++                  if [ "$drc" -eq 0 ]; then
++                      echo "js/esm matches a fresh build"
++                  elif [ "$drc" -eq 1 ]; then
++                      awk -v a="$committed/js/esm" -v b="$copy/js/esm" '
++                          function rel(p, root) { return "js/esm" substr(p, length(root) + 1) }
++                          /^Only in / {
++                              rest = substr($0, 9); i = index(rest, ": ")
++                              dir = substr(rest, 1, i - 1); name = substr(rest, i + 2)
++                              if (index(dir, b) == 1) {
++                                  print "::error file=" rel(dir, b) "/" name "::" rel(dir, b) "/" name " is produced by a fresh build but not committed: add it"
++                              } else {
++                                  print "::error file=" rel(dir, a) "/" name "::" rel(dir, a) "/" name " is committed but a fresh build does not produce it: delete it"
++                              }
++                              next
++                          }
++                          /^Files / && / differ$/ {
++                              p = substr($0, 7); p = substr(p, 1, index(p, " and ") - 1)
++                              print "::error file=" rel(p, a) "::" rel(p, a) " differs from a fresh build: it is stale"
++                              next
++                          }
++                          { print }
++                      ' <<<"$report"
++                      echo "::error::The committed js/esm is not what core's grunt esm builds from js/esm/src. Rebuild it on a Moodle 5.3 site (npx grunt esm) and commit js/esm (build/ and src/swizzle.json)."
++                      verdict=1
++                  else
++                      echo "$report"
++                      verdict=1
++                  fi
++              fi
++              if ! { rm -rf "$copy/js/esm" && cp -a "$backup" "$copy/js/esm" && rm -rf "$backup"; }; then
++                  echo "::error::esm: could not restore $copy/js/esm from $backup"
++                  verdict=1
++              fi
++              if [ -n "$builds" ]; then
++                  # Removed first, so an output grunt wrote that the archive does not hold goes too.
++                  if ! { xargs rm -rf <<<"$builds" && tar -xf "$others" && rm -f "$others"; }; then
++                      echo "::error::esm: could not restore the other components' js/esm/build from $others"
++                      verdict=1
++                  fi
++              fi
++              return "$verdict"
++          }
++          [ -d ./plugin/js/esm/src ] || exit 0
++          MOODLE_DIR=$(grep '^MOODLE_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
++          PLUGIN_DIR=$(grep '^PLUGIN_DIR=' ci/.env 2>/dev/null | cut -d= -f2-) || true
++          NVM_BIN_DIR=$(grep '^RUNTIME_NVM_BIN=' ci/.env 2>/dev/null | cut -d= -f2-) || true
++          if [ -z "$MOODLE_DIR" ] || [ -z "$PLUGIN_DIR" ] || [ ! -d "$PLUGIN_DIR/js/esm/src" ]; then
++            echo "::error::Could not find the installed copy of the plugin (MOODLE_DIR/PLUGIN_DIR in ci/.env) to rebuild js/esm in."
++            exit 1
++          fi
++          if [ ! -f "$MOODLE_DIR/.grunt/tasks/esm.js" ]; then
++            echo "esm: core has no .grunt/tasks/esm.js (Moodle 5.2 and older), skipping the js/esm build check"
++            exit 0
++          fi
++          # The Node that `moodle-plugin-ci install` chose from core's .nvmrc, as its own commands use it.
++          if [ -n "$NVM_BIN_DIR" ]; then
++            export PATH="$NVM_BIN_DIR:$PATH"
++          fi
++          COMMITTED="$PWD/plugin"
++          BUNDLER="$RUNNER_TEMP/esm-bundle.mjs"
++          cat > "$BUNDLER" <<'ESMBUNDLE'
++          // Bundle a plugin's React client into one ES module, beside core's per-file build.
++          //
++          // Core's 5.2 `grunt react` writes one output per source under js/esm/src and keeps a
++          // plugin's own relative imports external (.esbuild/plugin/plugincomponents.mjs), so a
++          // component tree of N files is N requests, discovered level by level. A plugin that wants
++          // one file opts in with a marker, js/esm/bundle.json, naming its entry and its output:
++          //
++          //     {"entry": "src/Block.tsx", "outfile": "build/bundle.js"}
++          //
++          // This script runs esbuild with `bundle: true` over that entry with the same options core
++          // uses (format esm, react and @moodle/lms/* external, automatic JSX, minified, linked
++          // source map, production define) minus the plugin that keeps relative imports external —
++          // which is exactly the option a bundle exists to drop. Beside the output it writes
++          // `<outfile>.manifest.json`: the SHA-1 of every source under js/esm/src, so a PHPUnit test
++          // in the plugin can tell a stale bundle from a fresh one, which core's grunt diff check
++          // cannot see. The per-file outputs stay where core's task puts them.
++          //
++          // Moodle 5.3's `grunt esm` (the task 5.2 called `react`) deletes js/esm/build before it
++          // rebuilds, so the bundle is built AFTER core's task, by both callers. It writes a .dev.js
++          // variant per source; the bundle gets none, and core's import map falls back to the .js
++          // when no .dev.js exists.
++          //
++          // Usage (from the Moodle root, where node_modules/esbuild lives):
++          //     node esm-bundle.mjs <plugin dir> [--out <dir>]
++          // With --out the bundle and the manifest are written under <dir> instead of the plugin's
++          // js/esm, which is how `mdl ci` checks the committed bundle without touching the mount.
++          //
++          // esbuild is resolved from the CURRENT DIRECTORY's node_modules, not from this file's
++          // location: the script is mounted into a container at a path that carries no
++          // node_modules of its own, and both callers run it with the Moodle root as cwd.
++
++          import {createRequire} from 'node:module';
++          import fs from 'node:fs';
++          import path from 'node:path';
++          import crypto from 'node:crypto';
++
++          const args = process.argv.slice(2);
++          const plugin = args[0];
++          if (!plugin) {
++              console.error('esm-bundle: usage: node esm-bundle.mjs <plugin dir> [--out <dir>]');
++              process.exit(2);
++          }
++          const outflag = args.indexOf('--out');
++          const outroot = outflag !== -1 ? args[outflag + 1] : null;
++          if (outflag !== -1 && !outroot) {
++              console.error('esm-bundle: --out needs a directory');
++              process.exit(2);
++          }
++
++          const esm = path.resolve(plugin, 'js/esm');
++          const markerpath = path.join(esm, 'bundle.json');
++          if (!fs.existsSync(markerpath)) {
++              console.error(`esm-bundle: no marker at ${markerpath}; nothing to bundle`);
++              process.exit(2);
++          }
++          const marker = JSON.parse(fs.readFileSync(markerpath, 'utf8'));
++          for (const key of ['entry', 'outfile']) {
++              if (typeof marker[key] !== 'string' || marker[key] === '') {
++                  console.error(`esm-bundle: bundle.json must name "${key}" (a path relative to js/esm)`);
++                  process.exit(2);
++              }
++          }
++          if (path.basename(marker.outfile).startsWith('bundle.') === false) {
++              // Not a hard rule, but the plugin's own freshness test names the file; say so early.
++              console.warn(`esm-bundle: outfile ${marker.outfile} is not named bundle.*; the plugin's tests may expect that`);
++          }
++
++          const entry = path.join(esm, marker.entry);
++          const outfile = path.join(outroot ? path.resolve(outroot) : esm, marker.outfile);
++          const manifestfile = outfile.replace(/\.js$/, '') + '.manifest.json';
++          if (!fs.existsSync(entry)) {
++              console.error(`esm-bundle: entry ${entry} does not exist`);
++              process.exit(2);
++          }
++
++          // A source named like the output would be overwritten by core's per-file task on the next
++          // grunt, silently, because that task maps a source to its output by name alone.
++          const srcdir = path.join(esm, 'src');
++          const outname = path.basename(marker.outfile).replace(/\.js$/, '');
++          for (const ext of ['.ts', '.tsx']) {
++              if (fs.existsSync(path.join(srcdir, outname + ext))) {
++                  console.error(`esm-bundle: js/esm/src/${outname}${ext} would be overwritten by core's per-file build; rename one of them`);
++                  process.exit(2);
++              }
++          }
++
++          const require = createRequire(path.join(process.cwd(), 'package.json'));
++          let esbuild;
++          try {
++              esbuild = require('esbuild');
++          } catch (e) {
++              console.error(`esm-bundle: esbuild is not resolvable from ${process.cwd()}; run from the Moodle root after npm install`);
++              process.exit(2);
++          }
++
++          fs.mkdirSync(path.dirname(outfile), {recursive: true});
++          await esbuild.build({
++              entryPoints: [entry],
++              outfile,
++              bundle: true,
++              format: 'esm',
++              external: ['react', 'react/*', 'react-dom', 'react-dom/*', '@moodlehq/design-system', '@moodlehq/design-system/*', '@moodle/lms', '@moodle/lms/*'],
++              jsx: 'automatic',
++              minify: true,
++              sourcemap: 'linked',
++              define: {'process.env.NODE_ENV': '"production"'},
++              logLevel: 'error',
++          });
++
++          // The manifest: every source under js/esm/src, sorted, with its SHA-1.
++          const sources = {};
++          const walk = (dir) => {
++              for (const name of fs.readdirSync(dir).sort()) {
++                  const full = path.join(dir, name);
++                  if (fs.statSync(full).isDirectory()) {
++                      walk(full);
++                  } else if (/\.(ts|tsx)$/.test(name)) {
++                      const rel = path.relative(esm, full).split(path.sep).join('/');
++                      sources[rel] = crypto.createHash('sha1').update(fs.readFileSync(full)).digest('hex');
++                  }
++              }
++          };
++          walk(srcdir);
++          const manifest = {entry: marker.entry, outfile: marker.outfile, sources};
++          fs.writeFileSync(manifestfile, JSON.stringify(manifest, null, 4) + '\n');
++          console.log(`esm-bundle: ${path.relative(process.cwd(), outfile)} (${Object.keys(sources).length} sources in the manifest)`);
++          ESMBUNDLE
++          cd "$MOODLE_DIR"
++          esm_tree_check "$COMMITTED" "$PLUGIN_DIR" "$BUNDLER"
++
 +      # Jest over the plugin's js/esm/tests (uaiblaine fork, UAIBLAINE.md change 5): core's own
 +      # Jest, as Moodle 5.3+ ships it in jest.config.js at the root, over the installed copy of
 +      # the plugin only. Skips, both passing: no js/esm/tests (silently), and a core without
@@ -269,7 +498,7 @@ index 5307418..37c08f1 100644
  
        - name: Mark cancelled jobs as failed.
          if: ${{ cancelled() }}
-@@ -665,7 +841,7 @@ jobs:
+@@ -665,7 +1070,7 @@ jobs:
  
    run:
      name: Runtime tests
@@ -278,7 +507,7 @@ index 5307418..37c08f1 100644
      needs: preflight
      env:
        GENERIC_USERNAME_1: ${{ secrets.GENERIC_USERNAME_1 }}
-@@ -707,10 +883,18 @@ jobs:
+@@ -707,10 +1112,18 @@ jobs:
  
        - name: Setup PHP ${{ matrix.php }}
          uses: shivammathur/setup-php@v2
@@ -299,7 +528,7 @@ index 5307418..37c08f1 100644
            coverage: none
  
        - name: Initialise moodle-plugin-ci
-@@ -721,15 +905,40 @@ jobs:
+@@ -721,15 +1134,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  
@@ -342,7 +571,7 @@ index 5307418..37c08f1 100644
              fi
            done
  
-@@ -857,7 +1066,7 @@ jobs:
+@@ -857,7 +1295,7 @@ jobs:
            # Moodle directory mounted at the same path for file uploads in Behat).
            docker run -d --rm --name=selenium --network=host --shm-size=2g \
              -v "$MOODLE_DIR:$MOODLE_DIR" \
@@ -351,7 +580,7 @@ index 5307418..37c08f1 100644
  
            # Moodle 5.1+ serves the site from the public subdirectory.
            DOCROOT="$MOODLE_DIR"
-@@ -1019,7 +1228,7 @@ jobs:
+@@ -1019,7 +1457,7 @@ jobs:
  
    verify:
      name: Runtime verification
