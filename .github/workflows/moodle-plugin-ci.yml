@@ -6,8 +6,9 @@
 # the Development Leftover Checker skips the code declared in thirdpartylibs.xml; and
 # gherkinlint skips the features of the plugin dependencies; a `runner` input sends
 # every job to a self-hosted runner label instead of ubuntu-24.04; a Jest step runs core's
-# Jest over the plugin's js/esm/tests; and an ESM build check fails a committed js/esm that
-# core 5.3's `grunt esm` would not rebuild identically.
+# Jest over the plugin's js/esm/tests; an ESM build check fails a committed js/esm that
+# core 5.3's `grunt esm` would not rebuild identically; and the runtime jobs install ffprobe
+# (ffmpeg) when the runner lacks it.
 #
 # Everything else stays MAH's on purpose, so `mdl ci <repo> --matrix` keeps deriving the
 # same legs and gates from a caller's ci.yml: the file name (mdl-ci selects jobs whose
@@ -16,10 +17,9 @@
 # and MAH's composite actions (still referenced from MAH).
 #
 # The delta is the `secrets:` entry below, the two "Add plugin dependencies" steps, the
-# Development Leftover Checker step, the Grunt, ESM build check and Jest steps, the
-# `runner` input with the four `runs-on` lines, the Selenium image default and the
-# setup-php inputs, kept as
-# uaiblaine/mah-delta.patch.
+# Development Leftover Checker step, the Grunt, ESM build check, Jest and Install ffprobe
+# steps, the `runner` input with the four `runs-on` lines, the Selenium image default and
+# the setup-php inputs, kept as uaiblaine/mah-delta.patch.
 # To follow MAH: fetch its file again, apply the patch, re-run actionlint, and update the
 # commit named above.
 name: Moodle Plugin CI
@@ -1125,6 +1125,17 @@ jobs:
           extensions: ${{ inputs.runner != '' && format('{0}{1}gd, intl, zip, sodium, exif, soap', matrix.extensions, matrix.extensions != '' && ', ' || '') || matrix.extensions }}
           ini-values: max_input_vars=5000, opcache.enable_cli=1${{ runner.arch == 'ARM64' && ', opcache.jit=disable' || '' }}
           coverage: none
+
+      - name: Install ffprobe
+        # uaiblaine fork (UAIBLAINE.md): mod_interactivevideo's video pipeline and its PHPUnit tests
+        # run /usr/bin/ffprobe. The self-hosted runner image already carries it, so only a runner
+        # without it pays for the apt install.
+        run: |
+          if ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          fi
+          ffprobe -version | head -n 1
 
       - name: Initialise moodle-plugin-ci
         run: |
