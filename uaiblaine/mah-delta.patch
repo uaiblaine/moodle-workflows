@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/moodle-plugin-ci.yml b/.github/workflows/moodle-plugin-ci.yml
-index 5307418..b70c5e9 100644
+index 5307418..5ebe18b 100644
 --- a/.github/workflows/moodle-plugin-ci.yml
 +++ b/.github/workflows/moodle-plugin-ci.yml
 @@ -1,3 +1,27 @@
@@ -11,8 +11,9 @@ index 5307418..b70c5e9 100644
 +# the Development Leftover Checker skips the code declared in thirdpartylibs.xml; and
 +# gherkinlint skips the features of the plugin dependencies; a `runner` input sends
 +# every job to a self-hosted runner label instead of ubuntu-24.04; a Jest step runs core's
-+# Jest over the plugin's js/esm/tests; and an ESM build check fails a committed js/esm that
-+# core 5.3's `grunt esm` would not rebuild identically.
++# Jest over the plugin's js/esm/tests; an ESM build check fails a committed js/esm that
++# core 5.3's `grunt esm` would not rebuild identically; and the runtime jobs install ffprobe
++# (ffmpeg) when the runner lacks it.
 +#
 +# Everything else stays MAH's on purpose, so `mdl ci <repo> --matrix` keeps deriving the
 +# same legs and gates from a caller's ci.yml: the file name (mdl-ci selects jobs whose
@@ -21,10 +22,9 @@ index 5307418..b70c5e9 100644
 +# and MAH's composite actions (still referenced from MAH).
 +#
 +# The delta is the `secrets:` entry below, the two "Add plugin dependencies" steps, the
-+# Development Leftover Checker step, the Grunt, ESM build check and Jest steps, the
-+# `runner` input with the four `runs-on` lines, the Selenium image default and the
-+# setup-php inputs, kept as
-+# uaiblaine/mah-delta.patch.
++# Development Leftover Checker step, the Grunt, ESM build check, Jest and Install ffprobe
++# steps, the `runner` input with the four `runs-on` lines, the Selenium image default and
++# the setup-php inputs, kept as uaiblaine/mah-delta.patch.
 +# To follow MAH: fetch its file again, apply the patch, re-run actionlint, and update the
 +# commit named above.
  name: Moodle Plugin CI
@@ -507,7 +507,7 @@ index 5307418..b70c5e9 100644
      needs: preflight
      env:
        GENERIC_USERNAME_1: ${{ secrets.GENERIC_USERNAME_1 }}
-@@ -707,10 +1112,18 @@ jobs:
+@@ -707,12 +1112,31 @@ jobs:
  
        - name: Setup PHP ${{ matrix.php }}
          uses: shivammathur/setup-php@v2
@@ -527,8 +527,21 @@ index 5307418..b70c5e9 100644
 +          ini-values: max_input_vars=5000, opcache.enable_cli=1${{ runner.arch == 'ARM64' && ', opcache.jit=disable' || '' }}
            coverage: none
  
++      - name: Install ffprobe
++        # uaiblaine fork (UAIBLAINE.md): mod_interactivevideo's video pipeline and its PHPUnit tests
++        # run /usr/bin/ffprobe. The self-hosted runner image already carries it, so only a runner
++        # without it pays for the apt install.
++        run: |
++          if ! command -v ffprobe >/dev/null 2>&1; then
++            sudo apt-get update -qq
++            sudo apt-get install -y -qq --no-install-recommends ffmpeg
++          fi
++          ffprobe -version | head -n 1
++
        - name: Initialise moodle-plugin-ci
-@@ -721,15 +1134,40 @@ jobs:
+         run: |
+           composer create-project -n --no-dev --prefer-dist moodlehq/moodle-plugin-ci ci ^4
+@@ -721,15 +1145,40 @@ jobs:
            sudo locale-gen en_AU.UTF-8
            echo "NVM_DIR=$HOME/.nvm" >> $GITHUB_ENV
  
@@ -571,7 +584,7 @@ index 5307418..b70c5e9 100644
              fi
            done
  
-@@ -857,7 +1295,7 @@ jobs:
+@@ -857,7 +1306,7 @@ jobs:
            # Moodle directory mounted at the same path for file uploads in Behat).
            docker run -d --rm --name=selenium --network=host --shm-size=2g \
              -v "$MOODLE_DIR:$MOODLE_DIR" \
@@ -580,7 +593,7 @@ index 5307418..b70c5e9 100644
  
            # Moodle 5.1+ serves the site from the public subdirectory.
            DOCROOT="$MOODLE_DIR"
-@@ -1019,7 +1457,7 @@ jobs:
+@@ -1019,7 +1468,7 @@ jobs:
  
    verify:
      name: Runtime verification

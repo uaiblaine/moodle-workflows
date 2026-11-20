@@ -2,7 +2,7 @@
 
 This is a fork of [moodle-an-hochschulen/moodle-workflows](https://github.com/moodle-an-hochschulen/moodle-workflows).
 The workflows, their copyright and their documentation (README.md) are Moodle an Hochschulen e.V.'s;
-this fork carries six changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
+this fork carries seven changes to `.github/workflows/moodle-plugin-ci.yml`, kept as small as possible so
 they can be re-applied on top of upstream.
 
 ## The changes
@@ -70,6 +70,13 @@ they can be re-applied on top of upstream.
    `ci/esm-bundle.mjs`, copied verbatim into the step. A plugin without `js/esm/src` skips silently;
    a core without `.grunt/tasks/esm.js` (5.2 and older) prints that it skips and passes. The function
    mirrors `esm_tree_check` in moodle-dev's `bin/mdl-ci`, which `mdl ci` runs inside its grunt step.
+
+7. **ffprobe on the runtime jobs.** After setup-php, an `Install ffprobe` step installs the
+   distribution's `ffmpeg` (`/usr/bin/ffprobe`) when the runner has no `ffprobe`:
+   `mod_interactivevideo`'s uploaded-video pipeline runs it in an adhoc task and its PHPUnit tests
+   call it. The self-hosted runner image (`uaiblaine/moodle-dev`'s `docker/Dockerfile.runner`) and
+   moodle-dev's `mdl ci` image already carry it, so the step only prints the version there; a
+   GitHub-hosted runner pays the apt install.
 
 Upstream's inputs keep their names and defaults, job names and the file name are upstream's, so callers and tools that read callers
 (`uses: .../moodle-plugin-ci.yml`) work unchanged.
